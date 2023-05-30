@@ -1,110 +1,67 @@
-import requests
-import json
-from abc import ABC, abstractmethod
-from keys import SuperJobAPIKey
-
-
-class JobFindAPI(ABC):
-
-    @abstractmethod
-    def get_vacancies(self, name: str) -> list:
-        pass
-
-
-class HeadHunterAPI(JobFindAPI):
-
-    def get_vacancies(self, name: str) -> list:
-        params = {
-            'text': name,  # Имя вакансии для поиска
-            'page': 0,  # Индекс страницы поиска на HH
-            'per_page': 100  # Кол-во вакансий на 1 странице
-        }
-        response = requests.get("https://api.hh.ru/vacancies", params)
-        data = json.loads(response.content.decode())
-        vacancies = []
-        for item in data["items"]:
-            name = item["name"]
-            experience = item["experience"]["name"]
-            link = "https://hh.ru/vacancy/" + item["id"]
-            salary = item["salary"]
-            if salary:
-                salary_from = item["salary"]["from"]
-                if not salary_from:
-                    salary_from = 0
-                salary_to = item["salary"]["to"]
-                if not salary_to:
-                    salary_to = 0
-                salary_cur = item["salary"]["currency"].lower()
-                if salary_cur == "rur":
-                    salary_cur = "rub"
-            else:
-                salary_from = 0
-                salary_to = 0
-                salary_cur = "rub"
-            salary = f"{salary_from}-{salary_to} {salary_cur}"
-            vacancy = {
-                "name": name,
-                "link": link,
-                "salary": salary,
-                "experience": experience
-
-            }
-            vacancies.append(vacancy)
-        return vacancies
-
-
-class SuperJobAPI(JobFindAPI):
-
-    # SUPERJOB_API_KEY = os.environ.get('SUPERJOB_API_KEY')
-    SUPERJOB_API_KEY = SuperJobAPIKey
-
-    def get_vacancies(self, name: str) -> list:
-        headers = {'X-Api-App-Id': self.SUPERJOB_API_KEY}
-        vacancies_count = 100
-        params = {'count': vacancies_count,
-                  'keyword': name}
-        response = requests.get('https://api.superjob.ru/2.0/vacancies/',
-                                    params=params, headers=headers)
-        data = json.loads(response.content.decode())
-        vacancies = []
-        for item in data["objects"]:
-            name = item["profession"]
-            salary_from = item["payment_from"]
-            salary_to = item["payment_to"]
-            salary_cur = item["currency"].lower()
-            experience = item["experience"]["title"]
-            link = item["link"]
-            salary = f"{salary_from}-{salary_to} {salary_cur}"
-            vacancy = {
-                "name": name,
-                "link": link,
-                "salary": salary,
-                "experience": experience
-            }
-            vacancies.append(vacancy)
-
-        return vacancies
-
-
 class Vacancy:
+    """Класс Вакансия содержит атрибуты:
+        имя вакансии
+        старт зарплаты
+        потолок зарплаты
+        валюта зарплаты
+        требуемый опыт
+        ссылка на вакансию
+    """
 
-    def __init__(self, name: str, salary: str, experience: str, link: str) -> None:
+    def __init__(self, name: str, link: str,
+                 salary_from: int, salary_to: int,
+                 salary_cur: str, experience: str) -> None:
         self.name = name
-        self.salary = salary
+        self.salary_from = salary_from
+        self.salary_to = salary_to
+        self.salary_cur = salary_cur
         self.experience = experience
         self.link = link
 
+    @classmethod
+    def from_dict(cls, item: dict):
+        """
+        Формирует экземпляр класса из словаря
+        """
+        return cls(item["name"], item["link"], item["salary_from"],
+                   item["salary_to"], item["salary_currency"], item["experience"])
+
+    def to_dict(self):
+        """
+         Формирует словарь из экземпляра класса
+         """
+        return {"name": self.name,
+                "link": self.link,
+                "salary_from": self.salary_from,
+                "salary_to": self.salary_to,
+                "salary_currency": self.salary_cur,
+                "experience": self.experience}
+
     def __str__(self):
-        return self.name
+        return f"{self.name} ({self.link})\n" \
+               f"{self.salary_from}-{self.salary_to} {self.salary_cur}\n" \
+               f"Требования: {self.experience}"
 
     def __repr__(self):
-        return f"{self.__class__.__name__}({self.name}, {self.link}, {self.salary}, {self.experience})"
+        return f"{self.__class__.__name__}({self.name}," \
+               f" {self.link}, {self.salary_from}, {self.salary_to}," \
+               f" {self.salary_cur}, {self.experience})"
 
+    def get_salary(self):
+        """Выводит максимальную зарплату указанную работодателем"""
+        return max(self.salary_from, self.salary_to)
 
-hh_api = HeadHunterAPI()
-vacancies = hh_api.get_vacancies("Python")
-sj_api = SuperJobAPI()
-vacancies.extend(sj_api.get_vacancies("Python"))
-for vacancy in vacancies:
-    print(vacancy)
-print(len(vacancies))
+    def __lt__(self, other):
+        return int(self.get_salary()) < int(other.get_salary())
+
+    def __gt__(self, other):
+        return int(self.get_salary()) > int(other.get_salary())
+
+    def __le__(self, other):
+        return int(self.get_salary()) <= int(other.get_salary())
+
+    def __ge__(self, other):
+        return int(self.get_salary()) >= int(other.get_salary())
+
+    def __eq__(self, other):
+        return int(self.get_salary()) == int(other.get_salary())
